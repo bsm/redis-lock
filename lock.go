@@ -8,38 +8,6 @@ import (
 	"gopkg.in/redis.v2"
 )
 
-const minWaitRetry = 10 * time.Millisecond
-
-type LockOptions struct {
-	// The maximum duration to lock a key for
-	// Default: 10s
-	LockTimeout time.Duration
-
-	// The maximum amount of time you are willing to wait to obtain that lock
-	// Default: 10s
-	WaitTimeout time.Duration
-
-	// The amount of time you are willing to wait between retries, must be at least 10ms
-	// Default: 100ms
-	WaitRetry time.Duration
-}
-
-func (o *LockOptions) normalize() *LockOptions {
-	if o == nil {
-		o = new(LockOptions)
-	}
-	if o.LockTimeout < 1 {
-		o.LockTimeout = 10 * time.Second
-	}
-	if o.WaitTimeout < 1 {
-		o.WaitTimeout = 10 * time.Second
-	}
-	if o.WaitRetry < minWaitRetry {
-		o.WaitRetry = minWaitRetry
-	}
-	return o
-}
-
 type Lock struct {
 	client *redis.Client
 	key    string
@@ -69,14 +37,15 @@ func (l *Lock) Lock() (bool, error) {
 	defer l.mutex.Unlock()
 
 	max := time.Now().Add(l.opts.WaitTimeout)
-	for max.After(time.Now()) {
-		l.deadline = time.Now().Add(l.opts.LockTimeout).UnixNano() + 1
+	for {
+		deadline := time.Now().Add(l.opts.LockTimeout).UnixNano() + 1
 
 		// Try to obtain a lock via SETNX
-		ok, err := l.setnx()
+		ok, err := l.setnx(deadline)
 		if err != nil {
 			return false, err
 		} else if ok {
+			l.deadline = deadline
 			return true, nil
 		}
 
@@ -88,14 +57,18 @@ func (l *Lock) Lock() (bool, error) {
 
 		// If held lock is expired, try to obtain expired lock via GETSET
 		if held.Before(time.Now()) {
-			prev, err := l.getset()
+			prev, err := l.getset(deadline)
 			if err != nil {
 				return false, err
 			} else if prev.Before(time.Now()) {
+				l.deadline = deadline
 				return true, nil
 			}
 		}
 
+		if time.Now().Add(l.opts.WaitRetry).After(max) {
+			break
+		}
 		time.Sleep(l.opts.WaitRetry)
 	}
 	return false, nil
@@ -128,8 +101,8 @@ func toTime(str string, err error) (time.Time, error) {
 	return nanoTime(num), nil
 }
 
-func (l *Lock) setnx() (bool, error) {
-	return l.client.SetNX(l.key, strconv.FormatInt(l.deadline, 10)).Result()
+func (l *Lock) setnx(deadline int64) (bool, error) {
+	return l.client.SetNX(l.key, strconv.FormatInt(deadline, 10)).Result()
 }
 
 func (l *Lock) del() error {
@@ -141,7 +114,7 @@ func (l *Lock) get() (time.Time, error) {
 	return toTime(str, err)
 }
 
-func (l *Lock) getset() (time.Time, error) {
-	str, err := l.client.GetSet(l.key, strconv.FormatInt(l.deadline, 10)).Result()
+func (l *Lock) getset(deadline int64) (time.Time, error) {
+	str, err := l.client.GetSet(l.key, strconv.FormatInt(deadline, 10)).Result()
 	return toTime(str, err)
 }

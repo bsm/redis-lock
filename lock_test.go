@@ -73,7 +73,7 @@ var _ = Describe("Lock", func() {
 		Expect(exp).To(BeTemporally(">", time.Now()))
 	})
 
-	It("should wait for expiring locks", func() {
+	It("should wait for expiring locks if WaitTimeout is set", func() {
 		future := time.Now().Add(50 * time.Millisecond).UnixNano()
 		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
 		Expect(err).NotTo(HaveOccurred())
@@ -89,7 +89,7 @@ var _ = Describe("Lock", func() {
 		Expect(exp).To(BeTemporally(">", time.Now()))
 	})
 
-	It("should wait for max WaitTimeout", func() {
+	It("should wait until WaitTimeout is reached", func() {
 		future := time.Now().Add(150 * time.Millisecond).UnixNano()
 		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
 		Expect(err).NotTo(HaveOccurred())
@@ -97,6 +97,18 @@ var _ = Describe("Lock", func() {
 		ok, err := subject.Lock()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeFalse())
+	})
+
+	It("should not wait for expiring locks if WaitTimeout is not set", func() {
+		subject.opts.WaitTimeout = 0
+		future := time.Now().Add(50 * time.Millisecond).UnixNano()
+		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
+		Expect(err).NotTo(HaveOccurred())
+
+		ok, err := subject.Lock()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeFalse())
+		Expect(future).To(BeNumerically(">", time.Now().UnixNano()))
 	})
 
 	It("should release held locks", func() {
