@@ -1,6 +1,8 @@
 package lock
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"strconv"
 	"sync"
 	"time"
@@ -13,9 +15,17 @@ type Lock struct {
 	key    string
 	opts   *LockOptions
 
-	deadline int64
-	mutex    sync.Mutex
+	token string
+	mutex sync.Mutex
 }
+
+const luaScript = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+	return redis.call("del", KEYS[1])
+else
+  return 0
+end
+`
 
 // ObtainLock is a shortcut for NewLock().Lock()
 func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, error) {
@@ -36,37 +46,25 @@ func (l *Lock) Lock() (bool, error) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	max := time.Now().Add(l.opts.WaitTimeout)
-	for {
-		deadline := time.Now().Add(l.opts.LockTimeout).UnixNano() + 1
+	// Create a random token
+	token, err := randomToken()
+	if err != nil {
+		return false, err
+	}
 
-		// Try to obtain a lock via SETNX
-		ok, err := l.setnx(deadline)
+	// Calculate the timestamp we are willing to wait for
+	stop := time.Now().Add(l.opts.WaitTimeout)
+	for {
+		// Try to obtain a lock
+		ok, err := l.obtain(token)
 		if err != nil {
 			return false, err
 		} else if ok {
-			l.deadline = deadline
+			l.token = token
 			return true, nil
 		}
 
-		// Check if lock is held by someone else
-		held, err := l.get()
-		if err != nil {
-			return false, err
-		}
-
-		// If held lock is expired, try to obtain expired lock via GETSET
-		if held.Before(time.Now()) {
-			prev, err := l.getset(deadline)
-			if err != nil {
-				return false, err
-			} else if prev.Before(time.Now()) {
-				l.deadline = deadline
-				return true, nil
-			}
-		}
-
-		if time.Now().Add(l.opts.WaitRetry).After(max) {
+		if time.Now().Add(l.opts.WaitRetry).After(stop) {
 			break
 		}
 		time.Sleep(l.opts.WaitRetry)
@@ -79,42 +77,34 @@ func (l *Lock) Unlock() error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	if l.deadline > time.Now().UnixNano() {
-		return l.del()
-	}
-	l.deadline = 0
-	return nil
+	err := l.release()
+	l.token = ""
+	return err
 }
 
 // Helpers
 
-func nanoTime(u int64) time.Time {
-	s := int64(time.Second)
-	return time.Unix(u/s, u%s)
-}
-
-func toTime(str string, err error) (time.Time, error) {
-	if err != nil {
-		return time.Time{}, err
+func (l *Lock) obtain(token string) (bool, error) {
+	ttl := strconv.FormatInt(int64(l.opts.LockTimeout/time.Millisecond), 10)
+	cmd := redis.NewStringCmd("set", l.key, token, "nx", "px", ttl)
+	l.client.Process(cmd)
+	str, err := cmd.Result()
+	if str == "OK" {
+		return true, nil
+	} else if err == redis.Nil {
+		return false, nil
 	}
-	num, _ := strconv.ParseInt(str, 10, 64)
-	return nanoTime(num), nil
+	return false, err
 }
 
-func (l *Lock) setnx(deadline int64) (bool, error) {
-	return l.client.SetNX(l.key, strconv.FormatInt(deadline, 10)).Result()
+func (l *Lock) release() error {
+	return l.client.Eval(luaScript, []string{l.key}, []string{l.token}).Err()
 }
 
-func (l *Lock) del() error {
-	return l.client.Del(l.key).Err()
-}
-
-func (l *Lock) get() (time.Time, error) {
-	str, err := l.client.Get(l.key).Result()
-	return toTime(str, err)
-}
-
-func (l *Lock) getset(deadline int64) (time.Time, error) {
-	str, err := l.client.GetSet(l.key, strconv.FormatInt(deadline, 10)).Result()
-	return toTime(str, err)
+func randomToken() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(buf), nil
 }

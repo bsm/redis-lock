@@ -2,7 +2,6 @@ package lock
 
 import (
 	"math/rand"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -53,76 +52,79 @@ var _ = Describe("Lock", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
-		val, err := redisClient.Get(testRedisKey).Result()
-		Expect(err).NotTo(HaveOccurred())
-		exp, _ := toTime(val, nil)
-		Expect(exp).To(BeTemporally(">", time.Now()))
-	})
+		val := redisClient.Get(testRedisKey).Val()
+		Expect(val).To(HaveLen(24))
 
-	It("should obtain expired locks", func() {
-		err := redisClient.Set(testRedisKey, "1313131313000000000").Err()
-		Expect(err).NotTo(HaveOccurred())
-
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
-
-		val, err := redisClient.Get(testRedisKey).Result()
-		Expect(err).NotTo(HaveOccurred())
-		exp, _ := toTime(val, nil)
-		Expect(exp).To(BeTemporally(">", time.Now()))
+		ttl := redisClient.PTTL(testRedisKey).Val()
+		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
 	It("should wait for expiring locks if WaitTimeout is set", func() {
-		future := time.Now().Add(50 * time.Millisecond).UnixNano()
-		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
-		Expect(err).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.PExpire(testRedisKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		ok, err := subject.Lock()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
-		Expect(future).To(BeNumerically("<", time.Now().UnixNano()))
 
-		val, err := redisClient.Get(testRedisKey).Result()
-		Expect(err).NotTo(HaveOccurred())
-		exp, _ := toTime(val, nil)
-		Expect(exp).To(BeTemporally(">", time.Now()))
+		val := redisClient.Get(testRedisKey).Val()
+		Expect(val).To(HaveLen(24))
+		Expect(subject.token).To(Equal(val))
+
+		ttl := redisClient.PTTL(testRedisKey).Val()
+		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
-	It("should wait until WaitTimeout is reached", func() {
-		future := time.Now().Add(150 * time.Millisecond).UnixNano()
-		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
-		Expect(err).NotTo(HaveOccurred())
+	It("should wait until WaitTimeout is reached, then give up", func() {
+		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		ok, err := subject.Lock()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeFalse())
+		Expect(subject.token).To(Equal(""))
+
+		val := redisClient.Get(testRedisKey).Val()
+		Expect(val).To(Equal("ABCD"))
+
+		ttl := redisClient.PTTL(testRedisKey).Val()
+		Expect(ttl).To(BeNumerically("~", 50*time.Millisecond, 10*time.Millisecond))
 	})
 
 	It("should not wait for expiring locks if WaitTimeout is not set", func() {
+		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 		subject.opts.WaitTimeout = 0
-		future := time.Now().Add(50 * time.Millisecond).UnixNano()
-		err := redisClient.Set(testRedisKey, strconv.FormatInt(future, 10)).Err()
-		Expect(err).NotTo(HaveOccurred())
 
 		ok, err := subject.Lock()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeFalse())
-		Expect(future).To(BeNumerically(">", time.Now().UnixNano()))
+
+		ttl := redisClient.PTTL(testRedisKey).Val()
+		Expect(ttl).To(BeNumerically("~", 150*time.Millisecond, 10*time.Millisecond))
 	})
 
-	It("should release held locks", func() {
+	It("should release own locks", func() {
 		ok, err := subject.Lock()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
 		Expect(subject.Unlock()).NotTo(HaveOccurred())
+		Expect(subject.token).To(Equal(""))
 		Expect(redisClient.Get(testRedisKey).Err()).To(Equal(redis.Nil))
 	})
 
+	It("should not release someone else's locks", func() {
+		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+
+		Expect(subject.Unlock()).NotTo(HaveOccurred())
+		Expect(subject.token).To(Equal(""))
+		Expect(redisClient.Get(testRedisKey).Val()).To(Equal("ABCD"))
+	})
+
 	It("should prevent multiple locks (fuzzing)", func() {
-		locks := make([]*Lock, 40)
-		for i := 0; i < 40; i++ {
+		locks := make([]*Lock, 1000)
+		for i := 0; i < 1000; i++ {
 			locks[i] = newLock()
 		}
 
