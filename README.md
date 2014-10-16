@@ -1,7 +1,7 @@
 # redis-lock [![Build Status](https://travis-ci.org/bsm/redis-lock.png?branch=master)](https://travis-ci.org/bsm/redis-lock)
 
 Simplified distributed locking implementation using [Redis](http://redis.io/topics/distlock).
-Supports a variety of redis clients. For more information, please see our examples.
+For more information, please see examples.
 
 ## Examples
 
