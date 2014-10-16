@@ -1,5 +1,7 @@
 language: go
 install: make
+services:
+  - redis-server
 go:
   - 1.2
   - 1.3
