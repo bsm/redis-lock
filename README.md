@@ -1,40 +1,11 @@
 # redis-lock [![Build Status](https://travis-ci.org/bsm/redis-lock.png?branch=master)](https://travis-ci.org/bsm/redis-lock)
 
-Distributed locking implementation using [Redis](http://redis.io). Uses [Go-Redis](https://github.com/go-redis/redis) client.
+Simplified distributed locking implementation using [Redis](http://redis.io/topics/distlock).
+Supports a variety of redis clients. For more information, please see our examples.
 
-## Example
+## Examples
 
-```go
-
-import (
-    "fmt"
-
-    "github.com/bsm/redis-lock"
-    "gopkg.in/redis.v2"
-)
-
-func main() {
-
-    // Connect to Redis
-    client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
-    defer client.Close()
-
-    // Create a new lock with default settings
-    lock, err := lock.ObtainLock(client, "lock.foo", nil)
-    if err != nil {
-        panic(err.Error())
-    } else if lock == nil {
-        panic("could not obtain lock!")
-    }
-    defer lock.Unlock()
-
-    // Perform something unique
-    time.Sleep(500*time.Millisecond)
-    fmt.Println("done!")
-
-}
-
-```
+See our [examples](_examples/) in the source tree.
 
 ## Testing
 

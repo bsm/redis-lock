@@ -3,15 +3,12 @@ package lock
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"strconv"
 	"sync"
 	"time"
-
-	"gopkg.in/redis.v2"
 )
 
 type Lock struct {
-	client *redis.Client
+	client Client
 	key    string
 	opts   *LockOptions
 
@@ -19,16 +16,8 @@ type Lock struct {
 	mutex sync.Mutex
 }
 
-const luaScript = `
-if redis.call("get", KEYS[1]) == ARGV[1] then
-	return redis.call("del", KEYS[1])
-else
-  return 0
-end
-`
-
 // ObtainLock is a shortcut for NewLock().Lock()
-func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, error) {
+func ObtainLock(client Client, key string, opts *LockOptions) (*Lock, error) {
 	lock := NewLock(client, key, opts)
 	if ok, err := lock.Lock(); err != nil || !ok {
 		return nil, err
@@ -37,7 +26,7 @@ func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, err
 }
 
 // NewLock creates a new distributed lock on key
-func NewLock(client *redis.Client, key string, opts *LockOptions) *Lock {
+func NewLock(client Client, key string, opts *LockOptions) *Lock {
 	return &Lock{client: client, key: key, opts: opts.normalize()}
 }
 
@@ -85,20 +74,12 @@ func (l *Lock) Unlock() error {
 // Helpers
 
 func (l *Lock) obtain(token string) (bool, error) {
-	ttl := strconv.FormatInt(int64(l.opts.LockTimeout/time.Millisecond), 10)
-	cmd := redis.NewStringCmd("set", l.key, token, "nx", "px", ttl)
-	l.client.Process(cmd)
-	str, err := cmd.Result()
-	if str == "OK" {
-		return true, nil
-	} else if err == redis.Nil {
-		return false, nil
-	}
-	return false, err
+	str, err := l.client.SetNxPx(l.key, token, int64(l.opts.LockTimeout/time.Millisecond))
+	return str == "OK", err
 }
 
 func (l *Lock) release() error {
-	return l.client.Eval(luaScript, []string{l.key}, []string{l.token}).Err()
+	return l.client.Eval(luaScript, l.key, l.token)
 }
 
 func randomToken() (string, error) {
