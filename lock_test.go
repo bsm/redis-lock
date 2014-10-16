@@ -2,6 +2,7 @@ package lock
 
 import (
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,7 +19,7 @@ var _ = Describe("Lock", func() {
 	var subject *Lock
 
 	var newLock = func() *Lock {
-		return NewLock(redisClient, testRedisKey, &LockOptions{
+		return NewLock(&redisWrapper{redisClient}, testRedisKey, &LockOptions{
 			WaitTimeout: 100 * time.Millisecond,
 			LockTimeout: time.Second,
 		})
@@ -42,7 +43,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should obtain through short-cut", func() {
-		lock, err := ObtainLock(redisClient, testRedisKey, nil)
+		lock, err := ObtainLock(&redisWrapper{redisClient}, testRedisKey, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock).To(BeAssignableToTypeOf(subject))
 	})
@@ -156,6 +157,23 @@ func TestSuite(t *testing.T) {
 }
 
 var redisClient *redis.Client
+
+type redisWrapper struct{ *redis.Client }
+
+func (c *redisWrapper) SetNxPx(key, value string, pttl int64) (string, error) {
+	cmd := redis.NewStringCmd("set", key, value, "nx", "px", strconv.FormatInt(pttl, 10))
+	c.Process(cmd)
+
+	str, err := cmd.Result()
+	if err == redis.Nil {
+		err = nil
+	}
+	return str, err
+}
+
+func (c *redisWrapper) Eval(script, key, arg string) error {
+	return c.Client.Eval(script, []string{key}, []string{arg}).Err()
+}
 
 var _ = BeforeSuite(func() {
 	redisClient = redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379", DB: 9})
