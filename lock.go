@@ -47,7 +47,7 @@ func (l *Lock) IsLocked() bool {
 	return l.token != ""
 }
 
-// Lock applies the lock, don't forget to defer the Release() function to release the lock after usage
+// Lock applies the lock, don't forget to defer the Unlock() function to release the lock after usage
 func (l *Lock) Lock() (bool, error) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
