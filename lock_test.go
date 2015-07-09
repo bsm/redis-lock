@@ -9,7 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"gopkg.in/redis.v2"
+	"gopkg.in/redis.v3"
 )
 
 const testRedisKey = "__bsm_redis_lock_unit_test__"
@@ -62,7 +62,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should wait for expiring locks if WaitTimeout is set", func() {
-		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		ok, err := subject.Lock()
@@ -79,7 +79,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should wait until WaitTimeout is reached, then give up", func() {
-		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		ok, err := subject.Lock()
@@ -96,7 +96,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should not wait for expiring locks if WaitTimeout is not set", func() {
-		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 		subject.opts.WaitTimeout = 0
 
@@ -122,7 +122,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should not release someone else's locks", func() {
-		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(subject.IsLocked()).To(BeFalse())
 
 		Expect(subject.Unlock()).NotTo(HaveOccurred())
@@ -172,7 +172,7 @@ var _ = Describe("Lock", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
-		Expect(redisClient.Set(testRedisKey, "ABCD").Err()).NotTo(HaveOccurred())
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 
 		ok, err = subject.Lock()
 		Expect(err).NotTo(HaveOccurred())

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/redis.v2"
+	"gopkg.in/redis.v3"
 )
 
 const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
@@ -16,7 +16,6 @@ const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.c
 type Lock struct {
 	client *redis.Client
 	key    string
-	ttl    string
 	opts   *LockOptions
 
 	token string
@@ -35,8 +34,7 @@ func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, err
 // NewLock creates a new distributed lock on key
 func NewLock(client *redis.Client, key string, opts *LockOptions) *Lock {
 	opts = opts.normalize()
-	ttl := strconv.FormatInt(int64(opts.LockTimeout/time.Millisecond), 10)
-	return &Lock{client: client, key: key, ttl: ttl, opts: opts}
+	return &Lock{client: client, key: key, opts: opts}
 }
 
 // IsLocked returns true if a lock is acquired
@@ -98,7 +96,8 @@ func (l *Lock) create() (bool, error) {
 }
 
 func (l *Lock) refresh() (bool, error) {
-	status, err := l.client.Eval(luaRefresh, []string{l.key}, []string{l.token, l.ttl}).Result()
+	ttl := strconv.FormatInt(int64(l.opts.LockTimeout/time.Millisecond), 10)
+	status, err := l.client.Eval(luaRefresh, []string{l.key}, []string{l.token, ttl}).Result()
 	if err != nil {
 		return false, err
 	} else if status == int64(1) {
@@ -108,14 +107,11 @@ func (l *Lock) refresh() (bool, error) {
 }
 
 func (l *Lock) obtain(token string) (bool, error) {
-	cmd := redis.NewStringCmd("set", l.key, token, "nx", "px", l.ttl)
-	l.client.Process(cmd)
-
-	str, err := cmd.Result()
+	ok, err := l.client.SetNX(l.key, token, l.opts.LockTimeout).Result()
 	if err == redis.Nil {
 		err = nil
 	}
-	return str == "OK", err
+	return ok, err
 }
 
 func (l *Lock) release() error {
