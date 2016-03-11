@@ -13,17 +13,23 @@ import (
 const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
 const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
 
+// RedisClient is a minimal client interface, supported by gopkg.in/redis.v3
+type RedisClient interface {
+	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	Eval(script string, keys []string, args []string) *redis.Cmd
+}
+
 type Lock struct {
-	client *redis.Client
+	client RedisClient
 	key    string
-	opts   *LockOptions
+	opts   LockOptions
 
 	token string
 	mutex sync.Mutex
 }
 
 // ObtainLock is a shortcut for NewLock().Lock()
-func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, error) {
+func ObtainLock(client RedisClient, key string, opts *LockOptions) (*Lock, error) {
 	lock := NewLock(client, key, opts)
 	if ok, err := lock.Lock(); err != nil || !ok {
 		return nil, err
@@ -32,17 +38,20 @@ func ObtainLock(client *redis.Client, key string, opts *LockOptions) (*Lock, err
 }
 
 // NewLock creates a new distributed lock on key
-func NewLock(client *redis.Client, key string, opts *LockOptions) *Lock {
-	opts = opts.normalize()
-	return &Lock{client: client, key: key, opts: opts}
+func NewLock(client RedisClient, key string, opts *LockOptions) *Lock {
+	if opts == nil {
+		opts = new(LockOptions)
+	}
+	return &Lock{client: client, key: key, opts: *opts.normalize()}
 }
 
 // IsLocked returns true if a lock is acquired
 func (l *Lock) IsLocked() bool {
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
+	locked := l.token != ""
+	l.mutex.Unlock()
 
-	return l.token != ""
+	return locked
 }
 
 // Lock applies the lock, don't forget to defer the Unlock() function to release the lock after usage
@@ -59,9 +68,10 @@ func (l *Lock) Lock() (bool, error) {
 // Unlock releases the lock
 func (l *Lock) Unlock() error {
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
+	err := l.release()
+	l.mutex.Unlock()
 
-	return l.release()
+	return err
 }
 
 // Helpers
