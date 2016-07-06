@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/redis.v3"
+	"gopkg.in/redis.v4"
 )
 
 const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
@@ -16,7 +16,7 @@ const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.c
 // RedisClient is a minimal client interface, supported by gopkg.in/redis.v3
 type RedisClient interface {
 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
-	Eval(script string, keys []string, args []string) *redis.Cmd
+	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
 }
 
 type Lock struct {
@@ -107,7 +107,7 @@ func (l *Lock) create() (bool, error) {
 
 func (l *Lock) refresh() (bool, error) {
 	ttl := strconv.FormatInt(int64(l.opts.LockTimeout/time.Millisecond), 10)
-	status, err := l.client.Eval(luaRefresh, []string{l.key}, []string{l.token, ttl}).Result()
+	status, err := l.client.Eval(luaRefresh, []string{l.key}, l.token, ttl).Result()
 	if err != nil {
 		return false, err
 	} else if status == int64(1) {
@@ -127,7 +127,7 @@ func (l *Lock) obtain(token string) (bool, error) {
 func (l *Lock) release() error {
 	defer l.reset()
 
-	err := l.client.Eval(luaRelease, []string{l.key}, []string{l.token}).Err()
+	err := l.client.Eval(luaRelease, []string{l.key}, l.token).Err()
 	if err == redis.Nil {
 		err = nil
 	}

@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/redis.v4"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"gopkg.in/redis.v3"
 )
 
 const testRedisKey = "__bsm_redis_lock_unit_test__"
@@ -216,7 +217,10 @@ func TestSuite(t *testing.T) {
 var redisClient *redis.Client
 
 var _ = BeforeSuite(func() {
-	redisClient = redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379", DB: 9})
+	redisClient = redis.NewClient(&redis.Options{
+		Network: "tcp",
+		Addr:    "127.0.0.1:6379", DB: 9,
+	})
 	Expect(redisClient.Ping().Err()).NotTo(HaveOccurred())
 })
 
