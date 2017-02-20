@@ -1,8 +1,10 @@
 language: go
-install: make test
+sudo: false
+install:
+  - go get -u -t ./...
 services:
   - redis-server
 go:
-  - 1.5
-  - 1.6
-  - tip
+  - 1.6.4
+  - 1.7.5
+  - 1.8

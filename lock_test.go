@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/redis.v4"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"gopkg.in/redis.v5"
 )
 
 const testRedisKey = "__bsm_redis_lock_unit_test__"
