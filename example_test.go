@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/bsm/redis-lock"
-	"gopkg.in/redis.v4"
+	"github.com/go-redis/redis"
 )
 
 func Example() {
