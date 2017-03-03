@@ -1,7 +1,9 @@
 language: go
 sudo: false
 install:
-  - (mkdir -p $GOPATH/src/github.com/go-redis && cd $GOPATH/src/github.com/go-redis && git clone https://github.com/go-redis/redis && cd redis && git checkout master)
+  - mkdir -p vendor/github.com/go-redis
+  - git clone https://github.com/go-redis/redis vendor/github.com/go-redis/redis
+  - (cd vendor/github.com/go-redis/redis && git checkout master)
   - go get -u -t ./...
 services:
   - redis-server
