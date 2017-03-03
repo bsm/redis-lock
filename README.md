@@ -1,11 +1,14 @@
-# redis-lock [![Build Status](https://travis-ci.org/bsm/redis-lock.png?branch=master)](https://travis-ci.org/bsm/redis-lock)
+# redis-lock
+
+[![Build Status](https://travis-ci.org/bsm/redis-lock.png?branch=master)](https://travis-ci.org/bsm/redis-lock)
+[![GoDoc](https://godoc.org/github.com/bsm/redis-lock?status.svg)](https://godoc.org/github.com/bsm/redis-lock)
 
 Simplified distributed locking implementation using [Redis](http://redis.io/topics/distlock).
 For more information, please see examples.
 
 ## Examples
 
-See our [examples](_examples/) in the source tree.
+See our [examples](https://godoc.org/github.com/bsm/redis-lock#example-package/) in the [documentation](https://godoc.org/github.com/bsm/redis-lock).
 
 ## Testing
 
@@ -15,7 +18,7 @@ Simply run:
 
 ## Licence
 
-    Copyright (c) 2014 Black Square Media
+    Copyright (c) 2017 Black Square Media
 
     Permission is hereby granted, free of charge, to any person obtaining
     a copy of this software and associated documentation files (the
