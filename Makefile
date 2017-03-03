@@ -1,7 +1,7 @@
 default: vet test
 
 vet:
-	go tool vet .
+	go vet .
 
 test:
 	go test ./...
