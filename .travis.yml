@@ -2,6 +2,7 @@ language: go
 sudo: false
 install:
   - go get -u -t ./...
+  - (cd $GOPATH/src/github.com/go-redis/redis && git checkout master)
 services:
   - redis-server
 go:
