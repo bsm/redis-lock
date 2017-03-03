@@ -4,6 +4,6 @@ vet:
 	go vet .
 
 test:
-	go test ./...
+	go test .
 
 .PHONY: default test vet
