@@ -13,12 +13,13 @@ import (
 const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
 const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
 
-// RedisClient is a minimal client interface, supported by gopkg.in/redis.v3
+// RedisClient is a minimal client interface
 type RedisClient interface {
 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
 }
 
+// Lock allows distributed locking
 type Lock struct {
 	client RedisClient
 	key    string

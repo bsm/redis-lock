@@ -4,6 +4,7 @@ import "time"
 
 const minWaitRetry = 10 * time.Millisecond
 
+// LockOptions describe the options for the lock
 type LockOptions struct {
 	// The maximum duration to lock a key for
 	// Default: 5s
