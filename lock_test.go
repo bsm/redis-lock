@@ -23,23 +23,14 @@ var _ = Describe("Lock", func() {
 			LockTimeout: time.Second,
 		})
 	}
-	var process = func(l *Lock) int {
-		time.Sleep(time.Duration(rand.Int63n(int64(10 * time.Millisecond))))
-		ok, err := l.Lock()
-		if err != nil {
-			return 100
-		} else if !ok {
-			return 0
-		}
-
-		defer l.Unlock()
-		time.Sleep(200 * time.Millisecond)
-		return 1
-	}
 
 	BeforeEach(func() {
 		subject = newLock()
 		Expect(subject.IsLocked()).To(BeFalse())
+	})
+
+	AfterEach(func() {
+		Expect(redisClient.Del(testRedisKey).Err()).NotTo(HaveOccurred())
 	})
 
 	It("should obtain through short-cut", func() {
@@ -181,29 +172,32 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should prevent multiple locks (fuzzing)", func() {
-		locks := make([]*Lock, 1000)
-		for i := 0; i < 1000; i++ {
-			locks[i] = newLock()
-		}
-
 		res := int32(0)
 		wg := new(sync.WaitGroup)
-		for _, lock := range locks {
+		for i := 0; i < 1000; i++ {
 			wg.Add(1)
-			go func(l *Lock) {
+			go func() {
 				defer wg.Done()
-				atomic.AddInt32(&res, int32(process(l)))
-			}(lock)
+
+				lock := newLock()
+				wait := rand.Int63n(int64(50 * time.Millisecond))
+				time.Sleep(time.Duration(wait))
+
+				ok, err := lock.Lock()
+				if err != nil {
+					atomic.AddInt32(&res, 100)
+					return
+				} else if !ok {
+					return
+				}
+				atomic.AddInt32(&res, 1)
+			}()
 		}
 		wg.Wait()
 		Expect(res).To(Equal(int32(1)))
 	})
 
 })
-
-/*************************************************************************
- * GINKGO TEST HOOK
- *************************************************************************/
 
 func TestSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
