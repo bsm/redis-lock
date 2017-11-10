@@ -3,6 +3,7 @@ package lock
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
@@ -13,35 +14,54 @@ import (
 const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
 const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
 
+var ErrCanntGetLock = errors.New("can't get lock")
+
 // RedisClient is a minimal client interface
 type RedisClient interface {
 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
 }
 
+// Handler is method wrapper
+type Handler func() error
+
 // Lock allows distributed locking
 type Lock struct {
 	client RedisClient
 	key    string
-	opts   LockOptions
+	opts   Options
 
 	token string
 	mutex sync.Mutex
 }
 
-// ObtainLock is a shortcut for NewLock().Lock()
-func ObtainLock(client RedisClient, key string, opts *LockOptions) (*Lock, error) {
+// RunWithLock run some code with Redis Lock
+func RunWithLock(client RedisClient, key string, handler Handler, opts *Options) error {
 	lock := NewLock(client, key, opts)
-	if ok, err := lock.Lock(); err != nil || !ok {
+	if ok, err := lock.Lock(); err != nil {
+		return err
+	} else if !ok {
+		return ErrCanntGetLock
+	}
+	defer lock.Unlock()
+	return handler()
+}
+
+// ObtainLock is a shortcut for NewLock().Lock()
+func ObtainLock(client RedisClient, key string, opts *Options) (*Lock, error) {
+	lock := NewLock(client, key, opts)
+	if ok, err := lock.Lock(); err != nil {
 		return nil, err
+	} else if !ok {
+		return nil, ErrCanntGetLock
 	}
 	return lock, nil
 }
 
 // NewLock creates a new distributed lock on key
-func NewLock(client RedisClient, key string, opts *LockOptions) *Lock {
+func NewLock(client RedisClient, key string, opts *Options) *Lock {
 	if opts == nil {
-		opts = new(LockOptions)
+		opts = new(Options)
 	}
 	return &Lock{client: client, key: key, opts: *opts.normalize()}
 }
@@ -88,6 +108,7 @@ func (l *Lock) create() (bool, error) {
 
 	// Calculate the timestamp we are willing to wait for
 	stop := time.Now().Add(l.opts.WaitTimeout)
+	retries := l.opts.RetriesCount
 	for {
 		// Try to obtain a lock
 		ok, err := l.obtain(token)
@@ -101,6 +122,13 @@ func (l *Lock) create() (bool, error) {
 		if time.Now().Add(l.opts.WaitRetry).After(stop) {
 			break
 		}
+
+		if l.opts.RetriesCount > 0 && retries <= 0 {
+			break
+		} else if l.opts.RetriesCount > 0 {
+			retries--
+		}
+
 		time.Sleep(l.opts.WaitRetry)
 	}
 	return false, nil

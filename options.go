@@ -2,10 +2,13 @@ package lock
 
 import "time"
 
-const minWaitRetry = 10 * time.Millisecond
+const (
+	minWaitRetry   = 10 * time.Millisecond
+	minLockTimeout = 5 * time.Second
+)
 
-// LockOptions describe the options for the lock
-type LockOptions struct {
+// Options describe the options for the lock
+type Options struct {
 	// The maximum duration to lock a key for
 	// Default: 5s
 	LockTimeout time.Duration
@@ -18,20 +21,27 @@ type LockOptions struct {
 	// to wait between retries.
 	// Default: 100ms, must be at least 10ms
 	WaitRetry time.Duration
+
+	// In case RetriesCount is activated, this it the count of retries.
+	// Default: 0
+	RetriesCount int
 }
 
-func (o *LockOptions) normalize() *LockOptions {
-	if o == nil {
-		o = new(LockOptions)
-	}
+func (o *Options) normalize() *Options {
 	if o.LockTimeout < 1 {
-		o.LockTimeout = 5 * time.Second
+		o.LockTimeout = minLockTimeout
+	}
+	if o.WaitRetry < minWaitRetry {
+		o.WaitRetry = minWaitRetry
+	}
+	if o.RetriesCount < 0 {
+		o.RetriesCount = 0
 	}
 	if o.WaitTimeout < 0 {
 		o.WaitTimeout = 0
 	}
-	if o.WaitRetry < minWaitRetry {
-		o.WaitRetry = minWaitRetry
+	if o.RetriesCount > 0 && o.WaitTimeout <= 0 {
+		o.WaitTimeout = o.WaitRetry * time.Duration(o.RetriesCount)
 	}
 	return o
 }
