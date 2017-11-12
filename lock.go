@@ -123,10 +123,9 @@ func (l *Lock) create() (bool, error) {
 
 		if l.opts.RetriesCount > 0 && retries <= 0 {
 			break
-		} else if l.opts.RetriesCount > 0 {
-			retries--
 		}
 
+		retries--
 		time.Sleep(l.opts.WaitRetry)
 	}
 	return false, nil

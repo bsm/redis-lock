@@ -219,8 +219,10 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should run with locks and prevent fuzzing", func() {
-		res := int32(0)
-		wg := new(sync.WaitGroup)
+		var (
+			wg  sync.WaitGroup
+			res int32
+		)
 
 		RunWithLock(redisClient, testRedisKey, func() error {
 			for i := 0; i < 1000; i++ {
@@ -232,8 +234,7 @@ var _ = Describe("Lock", func() {
 					wait := rand.Int63n(int64(50 * time.Millisecond))
 					time.Sleep(time.Duration(wait))
 
-					ok, err := lock.Lock()
-					if err != nil {
+					if ok, err := lock.Lock(); err != nil {
 						atomic.AddInt32(&res, 100)
 						return
 					} else if !ok {
