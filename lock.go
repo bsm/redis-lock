@@ -37,25 +37,23 @@ type Lock struct {
 
 // RunWithLock run some code with Redis Lock
 func RunWithLock(client RedisClient, key string, handler Handler, opts *Options) error {
-	lock := NewLock(client, key, opts)
-	if ok, err := lock.Lock(); err != nil {
+	locker, err := ObtainLock(client, key, opts)
+	if err != nil {
 		return err
-	} else if !ok {
-		return ErrCanntGetLock
 	}
-	defer lock.Unlock()
+	defer locker.Unlock()
 	return handler()
 }
 
 // ObtainLock is a shortcut for NewLock().Lock()
 func ObtainLock(client RedisClient, key string, opts *Options) (*Lock, error) {
-	lock := NewLock(client, key, opts)
-	if ok, err := lock.Lock(); err != nil {
+	locker := NewLock(client, key, opts)
+	if ok, err := locker.Lock(); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrCanntGetLock
 	}
-	return lock, nil
+	return locker, nil
 }
 
 // NewLock creates a new distributed lock on key

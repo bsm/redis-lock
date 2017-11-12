@@ -17,7 +17,6 @@ services:
   - redis-server
 script:
   - go test -v ./...
-  - goveralls -service=travis-ci -repotoken $COVERALLS_TOKEN
 go:
   - 1.6.4
   - 1.7.5
