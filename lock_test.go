@@ -34,30 +34,30 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should normalize options", func() {
-		lock := NewLock(redisClient, testRedisKey, &Options{
+		locker := NewLock(redisClient, testRedisKey, &Options{
 			RetriesCount: -1,
 			LockTimeout:  -1,
 			WaitRetry:    -1,
 			WaitTimeout:  -1,
 		})
-		Expect(lock.opts.RetriesCount).To(Equal(0))
-		Expect(lock.opts.LockTimeout).To(Equal(minLockTimeout))
-		Expect(lock.opts.WaitRetry).To(Equal(minWaitRetry))
-		Expect(lock.opts.WaitTimeout).To(Equal(time.Duration(0)))
+		Expect(locker.opts.RetriesCount).To(Equal(0))
+		Expect(locker.opts.LockTimeout).To(Equal(minLockTimeout))
+		Expect(locker.opts.WaitRetry).To(Equal(minWaitRetry))
+		Expect(locker.opts.WaitTimeout).To(Equal(time.Duration(0)))
 	})
 
 	It("should fail with `can't get lock`", func() {
-		lock := newLock()
-		lock.Lock()
-		defer lock.Unlock()
+		locker := newLock()
+		locker.Lock()
+		defer locker.Unlock()
 		_, err := ObtainLock(redisClient, testRedisKey, nil)
 		Expect(err).To(Equal(ErrCanntGetLock))
 	})
 
 	It("should o btain through short-cut", func() {
-		lock, err := ObtainLock(redisClient, testRedisKey, nil)
+		locker, err := ObtainLock(redisClient, testRedisKey, nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lock).To(BeAssignableToTypeOf(subject))
+		Expect(locker).To(BeAssignableToTypeOf(subject))
 	})
 
 	It("should obtain fresh locks", func() {
@@ -200,11 +200,11 @@ var _ = Describe("Lock", func() {
 			go func() {
 				defer wg.Done()
 
-				lock := newLock()
+				locker := newLock()
 				wait := rand.Int63n(int64(50 * time.Millisecond))
 				time.Sleep(time.Duration(wait))
 
-				ok, err := lock.Lock()
+				ok, err := locker.Lock()
 				if err != nil {
 					atomic.AddInt32(&res, 100)
 					return
@@ -230,11 +230,11 @@ var _ = Describe("Lock", func() {
 				go func() {
 					defer wg.Done()
 
-					lock := newLock()
+					locker := newLock()
 					wait := rand.Int63n(int64(50 * time.Millisecond))
 					time.Sleep(time.Duration(wait))
 
-					if ok, err := lock.Lock(); err != nil {
+					if ok, err := locker.Lock(); err != nil {
 						atomic.AddInt32(&res, 100)
 						return
 					} else if !ok {
