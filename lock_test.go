@@ -253,22 +253,24 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should wait for locks", func() {
-		res := 0
-		wg := new(sync.WaitGroup)
+		var (
+			wg  sync.WaitGroup
+			res int32
+		)
 		wg.Add(1)
-		count := 6
+		count := 10
 		timeout := 50 * time.Millisecond
 
 		go func() {
+			defer wg.Done()
 			RunWithLock(redisClient, testRedisKey, func() error {
-				res++
+				atomic.AddInt32(&res, 1)
 				return nil
 			}, &Options{RetriesCount: count})
-			wg.Done()
 		}()
 
 		var err = RunWithLock(redisClient, testRedisKey, func() error {
-			res++
+			atomic.AddInt32(&res, 1)
 			time.Sleep(timeout)
 			return nil
 		}, nil)
@@ -276,7 +278,7 @@ var _ = Describe("Lock", func() {
 		wg.Wait()
 
 		Expect(err).To(BeNil())
-		Expect(res).To(Equal(2))
+		Expect(res).To(Equal(int32(2)))
 	})
 
 	It("should not wait for locks", func() {
@@ -287,11 +289,11 @@ var _ = Describe("Lock", func() {
 		timeout := 20 * time.Millisecond
 
 		go func() {
+			defer wg.Done()
 			RunWithLock(redisClient, testRedisKey, func() error {
 				res++
 				return nil
 			}, &Options{RetriesCount: count})
-			wg.Done()
 		}()
 
 		var err = RunWithLock(redisClient, testRedisKey, func() error {
