@@ -88,7 +88,7 @@ func (l *Locker) Lock() (bool, error) {
 	return l.LockWithContext(emptyCtx)
 }
 
-// LockWithContext is like Lock but allows to pass an additional context which allows to cancel.
+// LockWithContext is like Lock but allows to pass an additional context which allows cancelling
 // lock attempts prematurely.
 func (l *Locker) LockWithContext(ctx context.Context) (bool, error) {
 	l.mutex.Lock()
