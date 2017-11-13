@@ -121,10 +121,11 @@ func (l *Locker) create(ctx context.Context) (bool, error) {
 	}
 
 	// Calculate the timestamp we are willing to wait for
-	deadline := time.Now().Add(l.opts.WaitTimeout)
+	attempts := l.opts.RetryCount + 1
 	var retryDelay *time.Timer
 
 	for {
+
 		// Try to obtain a lock
 		ok, err := l.obtain(token)
 		if err != nil {
@@ -134,15 +135,15 @@ func (l *Locker) create(ctx context.Context) (bool, error) {
 			return true, nil
 		}
 
-		if time.Now().Add(l.opts.WaitRetry).After(deadline) {
-			break
+		if attempts--; attempts <= 0 {
+			return false, err
 		}
 
 		if retryDelay == nil {
-			retryDelay = time.NewTimer(l.opts.WaitRetry)
+			retryDelay = time.NewTimer(l.opts.RetryDelay)
 			defer retryDelay.Stop()
 		} else {
-			retryDelay.Reset(l.opts.WaitRetry)
+			retryDelay.Reset(l.opts.RetryDelay)
 		}
 
 		select {
@@ -151,7 +152,6 @@ func (l *Locker) create(ctx context.Context) (bool, error) {
 		case <-retryDelay.C:
 		}
 	}
-	return false, nil
 }
 
 func (l *Locker) refresh(ctx context.Context) (bool, error) {

@@ -19,8 +19,8 @@ var _ = Describe("Locker", func() {
 
 	var newLock = func() *Locker {
 		return New(redisClient, testRedisKey, &Options{
-			WaitTimeout: 100 * time.Millisecond,
-			WaitRetry:   10 * time.Millisecond,
+			RetryCount:  4,
+			RetryDelay:  25 * time.Millisecond,
 			LockTimeout: time.Second,
 		})
 	}
@@ -41,13 +41,13 @@ var _ = Describe("Locker", func() {
 	It("should normalize options", func() {
 		locker := New(redisClient, testRedisKey, &Options{
 			LockTimeout: -1,
-			WaitRetry:   -1,
-			WaitTimeout: -1,
+			RetryCount:  -1,
+			RetryDelay:  -1,
 		})
 		Expect(locker.opts).To(Equal(Options{
 			LockTimeout: 5 * time.Second,
-			WaitRetry:   100 * time.Millisecond,
-			WaitTimeout: 0,
+			RetryCount:  0,
+			RetryDelay:  100 * time.Millisecond,
 		}))
 	})
 
@@ -72,20 +72,29 @@ var _ = Describe("Locker", func() {
 		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
-	It("should wait for expiring locks if WaitTimeout is set", func() {
+	It("should retry if enabled", func() {
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(redisClient.PExpire(testRedisKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
+		Expect(redisClient.PExpire(testRedisKey, 30*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
-		val := redisClient.Get(testRedisKey).Val()
-		Expect(val).To(HaveLen(24))
-		Expect(subject.token).To(Equal(val))
+		Expect(redisClient.Get(testRedisKey).Result()).To(Equal(subject.token))
+		Expect(subject.token).To(HaveLen(24))
 		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
-	It("should wait until WaitTimeout is reached, then give up", func() {
+	It("should not retry if not enabled", func() {
+		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
+		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
+		subject.opts.RetryCount = 0
+
+		Expect(subject.Lock()).To(BeFalse())
+		Expect(subject.IsLocked()).To(BeFalse())
+		Expect(getTTL()).To(BeNumerically("~", 150*time.Millisecond, 10*time.Millisecond))
+	})
+
+	It("should give up when retry count reached", func() {
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 
@@ -94,17 +103,7 @@ var _ = Describe("Locker", func() {
 		Expect(subject.token).To(Equal(""))
 
 		Expect(redisClient.Get(testRedisKey).Result()).To(Equal("ABCD"))
-		Expect(getTTL()).To(BeNumerically("~", 50*time.Millisecond, 10*time.Millisecond))
-	})
-
-	It("should not wait for expiring locks if WaitTimeout is not set", func() {
-		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
-		subject.opts.WaitTimeout = 0
-
-		Expect(subject.Lock()).To(BeFalse())
-		Expect(subject.IsLocked()).To(BeFalse())
-		Expect(getTTL()).To(BeNumerically("~", 150*time.Millisecond, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", 45*time.Millisecond, 20*time.Millisecond))
 	})
 
 	It("should release own locks", func() {
@@ -199,7 +198,7 @@ var _ = Describe("Locker", func() {
 			defer wg.Done()
 			defer GinkgoRecover()
 
-			err := Run(redisClient, testRedisKey, &Options{WaitRetry: 10 * time.Millisecond, WaitTimeout: 100 * time.Millisecond}, func() error {
+			err := Run(redisClient, testRedisKey, &Options{RetryCount: 10, RetryDelay: 10 * time.Millisecond}, func() error {
 				atomic.AddInt32(&res, 1)
 				return nil
 			})
@@ -228,7 +227,7 @@ var _ = Describe("Locker", func() {
 			defer wg.Done()
 			defer GinkgoRecover()
 
-			err := Run(redisClient, testRedisKey, &Options{WaitRetry: 10 * time.Millisecond, WaitTimeout: 50 * time.Millisecond}, func() error {
+			err := Run(redisClient, testRedisKey, &Options{RetryCount: 1, RetryDelay: 10 * time.Millisecond}, func() error {
 				atomic.AddInt32(&res, 1)
 				return nil
 			})

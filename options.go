@@ -8,24 +8,24 @@ type Options struct {
 	// Default: 5s
 	LockTimeout time.Duration
 
-	// The maximum amount of time you are willing to wait to obtain that lock.
-	// Default: 0 = do not wait
-	WaitTimeout time.Duration
+	// The number of time the acquisition of a lock will be retried.
+	// Default: 0 = do not retry
+	RetryCount int
 
-	// WaitRetry is the amount of time you are willing to wait between retries.
+	// RetryDelay is the amount of time to wait between retries.
 	// Default: 100ms
-	WaitRetry time.Duration
+	RetryDelay time.Duration
 }
 
 func (o *Options) normalize() *Options {
 	if o.LockTimeout < 1 {
 		o.LockTimeout = 5 * time.Second
 	}
-	if o.WaitTimeout < 0 {
-		o.WaitTimeout = 0
+	if o.RetryCount < 0 {
+		o.RetryCount = 0
 	}
-	if o.WaitRetry < 1 {
-		o.WaitRetry = 100 * time.Millisecond
+	if o.RetryDelay < 1 {
+		o.RetryDelay = 100 * time.Millisecond
 	}
 	return o
 }
