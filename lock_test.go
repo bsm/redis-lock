@@ -20,8 +20,13 @@ var _ = Describe("Locker", func() {
 	var newLock = func() *Locker {
 		return New(redisClient, testRedisKey, &Options{
 			WaitTimeout: 100 * time.Millisecond,
+			WaitRetry:   10 * time.Millisecond,
 			LockTimeout: time.Second,
 		})
+	}
+
+	var getTTL = func() (time.Duration, error) {
+		return redisClient.PTTL(testRedisKey).Result()
 	}
 
 	BeforeEach(func() {
@@ -35,76 +40,61 @@ var _ = Describe("Locker", func() {
 
 	It("should normalize options", func() {
 		locker := New(redisClient, testRedisKey, &Options{
-			RetriesCount: -1,
-			LockTimeout:  -1,
-			WaitRetry:    -1,
-			WaitTimeout:  -1,
+			LockTimeout: -1,
+			WaitRetry:   -1,
+			WaitTimeout: -1,
 		})
-		Expect(locker.opts.RetriesCount).To(Equal(0))
-		Expect(locker.opts.LockTimeout).To(Equal(minLockTimeout))
-		Expect(locker.opts.WaitRetry).To(Equal(minWaitRetry))
-		Expect(locker.opts.WaitTimeout).To(Equal(time.Duration(0)))
+		Expect(locker.opts).To(Equal(Options{
+			LockTimeout: 5 * time.Second,
+			WaitRetry:   100 * time.Millisecond,
+			WaitTimeout: 0,
+		}))
 	})
 
-	It("should fail with `can't get lock`", func() {
+	It("should fail obtain with error", func() {
 		locker := newLock()
 		locker.Lock()
 		defer locker.Unlock()
-		_, err := ObtainLock(redisClient, testRedisKey, nil)
-		Expect(err).To(Equal(ErrCannotGetLock))
+
+		_, err := Obtain(redisClient, testRedisKey, nil)
+		Expect(err).To(Equal(ErrLockNotObtained))
 	})
 
-	It("should o btain through short-cut", func() {
-		locker, err := ObtainLock(redisClient, testRedisKey, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(locker).To(BeAssignableToTypeOf(subject))
+	It("should obtain through short-cut", func() {
+		Expect(Obtain(redisClient, testRedisKey, nil)).To(BeAssignableToTypeOf(subject))
 	})
 
 	It("should obtain fresh locks", func() {
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
-		val := redisClient.Get(testRedisKey).Val()
-		Expect(val).To(HaveLen(24))
-
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
+		Expect(redisClient.Get(testRedisKey).Result()).To(HaveLen(24))
+		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
 	It("should wait for expiring locks if WaitTimeout is set", func() {
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
 		val := redisClient.Get(testRedisKey).Val()
 		Expect(val).To(HaveLen(24))
 		Expect(subject.token).To(Equal(val))
-
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
 	It("should wait until WaitTimeout is reached, then give up", func() {
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
+		Expect(subject.Lock()).To(BeFalse())
 		Expect(subject.IsLocked()).To(BeFalse())
 		Expect(subject.token).To(Equal(""))
 
-		val := redisClient.Get(testRedisKey).Val()
-		Expect(val).To(Equal("ABCD"))
-
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", 50*time.Millisecond, 10*time.Millisecond))
+		Expect(redisClient.Get(testRedisKey).Result()).To(Equal("ABCD"))
+		Expect(getTTL()).To(BeNumerically("~", 50*time.Millisecond, 10*time.Millisecond))
 	})
 
 	It("should not wait for expiring locks if WaitTimeout is not set", func() {
@@ -112,19 +102,13 @@ var _ = Describe("Locker", func() {
 		Expect(redisClient.PExpire(testRedisKey, 150*time.Millisecond).Err()).NotTo(HaveOccurred())
 		subject.opts.WaitTimeout = 0
 
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
+		Expect(subject.Lock()).To(BeFalse())
 		Expect(subject.IsLocked()).To(BeFalse())
-
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", 150*time.Millisecond, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", 150*time.Millisecond, 10*time.Millisecond))
 	})
 
 	It("should release own locks", func() {
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
 		Expect(subject.Unlock()).NotTo(HaveOccurred())
@@ -144,51 +128,36 @@ var _ = Describe("Locker", func() {
 	})
 
 	It("should refresh locks", func() {
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
 		time.Sleep(50 * time.Millisecond)
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", 950*time.Millisecond, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", 950*time.Millisecond, 10*time.Millisecond))
 
-		ok, err = subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
-		ttl = redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
 	It("should re-create expired locks on refresh", func() {
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 		token := subject.token
 
 		Expect(redisClient.Del(testRedisKey).Err()).NotTo(HaveOccurred())
 
-		ok, err = subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 		Expect(subject.token).NotTo(Equal(token))
-		ttl := redisClient.PTTL(testRedisKey).Val()
-		Expect(ttl).To(BeNumerically("~", time.Second, 10*time.Millisecond))
+		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
 	It("should not re-capture expired locks acquiredby someone else", func() {
-		ok, err := subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 
-		ok, err = subject.Lock()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
+		Expect(subject.Lock()).To(BeFalse())
 		Expect(subject.IsLocked()).To(BeFalse())
 	})
 
@@ -198,6 +167,7 @@ var _ = Describe("Locker", func() {
 		for i := 0; i < 1000; i++ {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 
 				locker := newLock()
@@ -218,97 +188,67 @@ var _ = Describe("Locker", func() {
 		Expect(res).To(Equal(int32(1)))
 	})
 
-	It("should run with locks and prevent fuzzing", func() {
+	It("should retry and wait for locks if requested", func() {
 		var (
 			wg  sync.WaitGroup
 			res int32
 		)
 
-		RunWithLock(redisClient, testRedisKey, nil, func() error {
-			for i := 0; i < 1000; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					locker := newLock()
-					wait := rand.Int63n(int64(50 * time.Millisecond))
-					time.Sleep(time.Duration(wait))
-
-					if ok, err := locker.Lock(); err != nil {
-						atomic.AddInt32(&res, 100)
-						return
-					} else if !ok {
-						return
-					}
-					atomic.AddInt32(&res, 1)
-				}()
-			}
-
-			wg.Wait()
-
-			return nil
-		})
-
-		Expect(res).To(Equal(int32(0)))
-	})
-
-	It("should wait for locks", func() {
-		var (
-			wg  sync.WaitGroup
-			res int32
-		)
 		wg.Add(1)
-		count := 10
-		timeout := 50 * time.Millisecond
-
 		go func() {
 			defer wg.Done()
-			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
+			defer GinkgoRecover()
+
+			err := Run(redisClient, testRedisKey, &Options{WaitRetry: 10 * time.Millisecond, WaitTimeout: 100 * time.Millisecond}, func() error {
 				atomic.AddInt32(&res, 1)
 				return nil
 			})
+			Expect(err).NotTo(HaveOccurred())
 		}()
 
-		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
+		err := Run(redisClient, testRedisKey, nil, func() error {
 			atomic.AddInt32(&res, 1)
-			time.Sleep(timeout)
+			time.Sleep(20 * time.Millisecond)
 			return nil
 		})
-
 		wg.Wait()
 
-		Expect(err).To(BeNil())
+		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(int32(2)))
 	})
 
-	It("should not wait for locks", func() {
-		res := 0
-		wg := new(sync.WaitGroup)
-		wg.Add(1)
-		count := 1
-		timeout := 20 * time.Millisecond
+	It("should give up retrying after timeout", func() {
+		var (
+			wg  sync.WaitGroup
+			res int32
+		)
 
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
-				res++
+			defer GinkgoRecover()
+
+			err := Run(redisClient, testRedisKey, &Options{WaitRetry: 10 * time.Millisecond, WaitTimeout: 50 * time.Millisecond}, func() error {
+				atomic.AddInt32(&res, 1)
 				return nil
 			})
+			Expect(err).To(Equal(ErrLockNotObtained))
 		}()
 
-		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
-			res++
-			time.Sleep(timeout)
+		err := Run(redisClient, testRedisKey, nil, func() error {
+			atomic.AddInt32(&res, 1)
+			time.Sleep(100 * time.Millisecond)
 			return nil
 		})
-
 		wg.Wait()
 
-		Expect(err).To(BeNil())
-		Expect(res).To(Equal(1))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(int32(1)))
 	})
 
 })
+
+// --------------------------------------------------------------------
 
 func TestSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -329,5 +269,5 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	redisClient.Close()
+	Expect(redisClient.Close()).To(Succeed())
 })
