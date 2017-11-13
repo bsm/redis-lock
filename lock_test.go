@@ -14,11 +14,11 @@ import (
 
 const testRedisKey = "__bsm_redis_lock_unit_test__"
 
-var _ = Describe("Lock", func() {
-	var subject *Lock
+var _ = Describe("Locker", func() {
+	var subject *Locker
 
-	var newLock = func() *Lock {
-		return NewLock(redisClient, testRedisKey, &LockOptions{
+	var newLock = func() *Locker {
+		return New(redisClient, testRedisKey, &Options{
 			WaitTimeout: 100 * time.Millisecond,
 			LockTimeout: time.Second,
 		})
@@ -33,10 +33,31 @@ var _ = Describe("Lock", func() {
 		Expect(redisClient.Del(testRedisKey).Err()).NotTo(HaveOccurred())
 	})
 
-	It("should obtain through short-cut", func() {
-		lock, err := ObtainLock(redisClient, testRedisKey, nil)
+	It("should normalize options", func() {
+		locker := New(redisClient, testRedisKey, &Options{
+			RetriesCount: -1,
+			LockTimeout:  -1,
+			WaitRetry:    -1,
+			WaitTimeout:  -1,
+		})
+		Expect(locker.opts.RetriesCount).To(Equal(0))
+		Expect(locker.opts.LockTimeout).To(Equal(minLockTimeout))
+		Expect(locker.opts.WaitRetry).To(Equal(minWaitRetry))
+		Expect(locker.opts.WaitTimeout).To(Equal(time.Duration(0)))
+	})
+
+	It("should fail with `can't get lock`", func() {
+		locker := newLock()
+		locker.Lock()
+		defer locker.Unlock()
+		_, err := ObtainLock(redisClient, testRedisKey, nil)
+		Expect(err).To(Equal(ErrCannotGetLock))
+	})
+
+	It("should o btain through short-cut", func() {
+		locker, err := ObtainLock(redisClient, testRedisKey, nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lock).To(BeAssignableToTypeOf(subject))
+		Expect(locker).To(BeAssignableToTypeOf(subject))
 	})
 
 	It("should obtain fresh locks", func() {
@@ -179,11 +200,11 @@ var _ = Describe("Lock", func() {
 			go func() {
 				defer wg.Done()
 
-				lock := newLock()
+				locker := newLock()
 				wait := rand.Int63n(int64(50 * time.Millisecond))
 				time.Sleep(time.Duration(wait))
 
-				ok, err := lock.Lock()
+				ok, err := locker.Lock()
 				if err != nil {
 					atomic.AddInt32(&res, 100)
 					return
@@ -195,6 +216,96 @@ var _ = Describe("Lock", func() {
 		}
 		wg.Wait()
 		Expect(res).To(Equal(int32(1)))
+	})
+
+	It("should run with locks and prevent fuzzing", func() {
+		var (
+			wg  sync.WaitGroup
+			res int32
+		)
+
+		RunWithLock(redisClient, testRedisKey, nil, func() error {
+			for i := 0; i < 1000; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+
+					locker := newLock()
+					wait := rand.Int63n(int64(50 * time.Millisecond))
+					time.Sleep(time.Duration(wait))
+
+					if ok, err := locker.Lock(); err != nil {
+						atomic.AddInt32(&res, 100)
+						return
+					} else if !ok {
+						return
+					}
+					atomic.AddInt32(&res, 1)
+				}()
+			}
+
+			wg.Wait()
+
+			return nil
+		})
+
+		Expect(res).To(Equal(int32(0)))
+	})
+
+	It("should wait for locks", func() {
+		var (
+			wg  sync.WaitGroup
+			res int32
+		)
+		wg.Add(1)
+		count := 10
+		timeout := 50 * time.Millisecond
+
+		go func() {
+			defer wg.Done()
+			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
+				atomic.AddInt32(&res, 1)
+				return nil
+			})
+		}()
+
+		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
+			atomic.AddInt32(&res, 1)
+			time.Sleep(timeout)
+			return nil
+		})
+
+		wg.Wait()
+
+		Expect(err).To(BeNil())
+		Expect(res).To(Equal(int32(2)))
+	})
+
+	It("should not wait for locks", func() {
+		res := 0
+		wg := new(sync.WaitGroup)
+		wg.Add(1)
+		count := 1
+		timeout := 20 * time.Millisecond
+
+		go func() {
+			defer wg.Done()
+			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
+				res++
+				return nil
+			})
+		}()
+
+		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
+			res++
+			time.Sleep(timeout)
+			return nil
+		})
+
+		wg.Wait()
+
+		Expect(err).To(BeNil())
+		Expect(res).To(Equal(1))
 	})
 
 })
