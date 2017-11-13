@@ -43,6 +43,7 @@ func RunWithLock(client RedisClient, key string, opts *Options, handler func() e
 }
 
 // ObtainLock is a shortcut for New().Locker()
+// if we can't get a lock, we return error `ErrCannotGetLock`
 func ObtainLock(client RedisClient, key string, opts *Options) (*Locker, error) {
 	locker := New(client, key, opts)
 	if ok, err := locker.Lock(); err != nil {
