@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -11,18 +12,25 @@ import (
 	"github.com/go-redis/redis"
 )
 
-const luaRefresh = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
-const luaRelease = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
+var luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
+var luaRelease = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
 
-var ErrCannotGetLock = errors.New("cannot get lock")
+var emptyCtx = context.Background()
 
-// RedisClient is a minimal client interface
+// ErrLockNotObtained may be returned by Obtain() and Run()
+// if a lock could not be obtained.
+var ErrLockNotObtained = errors.New("lock not obtained")
+
+// RedisClient is a minimal client interface.
 type RedisClient interface {
 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
+	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
+	ScriptExists(scripts ...string) *redis.BoolSliceCmd
+	ScriptLoad(script string) *redis.StringCmd
 }
 
-// Locker allows distributed locking
+// Locker allows (repeated) distributed locking.
 type Locker struct {
 	client RedisClient
 	key    string
@@ -32,9 +40,10 @@ type Locker struct {
 	mutex sync.Mutex
 }
 
-// RunWithLock run some code with Redis Locker
-func RunWithLock(client RedisClient, key string, opts *Options, handler func() error) error {
-	locker, err := ObtainLock(client, key, opts)
+// Run runs a callback handler with a Redis lock. It may return ErrLockNotObtained
+// if a lock was not successfully acquired.
+func Run(client RedisClient, key string, opts *Options, handler func() error) error {
+	locker, err := Obtain(client, key, opts)
 	if err != nil {
 		return err
 	}
@@ -42,26 +51,30 @@ func RunWithLock(client RedisClient, key string, opts *Options, handler func() e
 	return handler()
 }
 
-// ObtainLock is a shortcut for New().Locker()
-func ObtainLock(client RedisClient, key string, opts *Options) (*Locker, error) {
+// Obtain is a shortcut for New().Lock(). It may return ErrLockNotObtained
+// if a lock was not successfully acquired.
+func Obtain(client RedisClient, key string, opts *Options) (*Locker, error) {
 	locker := New(client, key, opts)
 	if ok, err := locker.Lock(); err != nil {
 		return nil, err
 	} else if !ok {
-		return nil, ErrCannotGetLock
+		return nil, ErrLockNotObtained
 	}
 	return locker, nil
 }
 
-// New creates a new distributed lock on key
+// New creates a new distributed locker on a given key.
 func New(client RedisClient, key string, opts *Options) *Locker {
-	if opts == nil {
-		opts = new(Options)
+	var o Options
+	if opts != nil {
+		o = *opts
 	}
-	return &Locker{client: client, key: key, opts: *opts.normalize()}
+	o.normalize()
+
+	return &Locker{client: client, key: key, opts: o}
 }
 
-// IsLocked returns true if a lock is acquired
+// IsLocked returns true if a lock is still being held.
 func (l *Locker) IsLocked() bool {
 	l.mutex.Lock()
 	locked := l.token != ""
@@ -70,15 +83,21 @@ func (l *Locker) IsLocked() bool {
 	return locked
 }
 
-// Locker applies the lock, don't forget to defer the Unlock() function to release the lock after usage
+// Lock applies the lock, don't forget to defer the Unlock() function to release the lock after usage.
 func (l *Locker) Lock() (bool, error) {
+	return l.LockWithContext(emptyCtx)
+}
+
+// LockWithContext is like Lock but allows to pass an additional context which allows cancelling
+// lock attempts prematurely.
+func (l *Locker) LockWithContext(ctx context.Context) (bool, error) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
 	if l.token != "" {
-		return l.refresh()
+		return l.refresh(ctx)
 	}
-	return l.create()
+	return l.create(ctx)
 }
 
 // Unlock releases the lock
@@ -92,7 +111,7 @@ func (l *Locker) Unlock() error {
 
 // Helpers
 
-func (l *Locker) create() (bool, error) {
+func (l *Locker) create(ctx context.Context) (bool, error) {
 	l.reset()
 
 	// Create a random token
@@ -102,9 +121,11 @@ func (l *Locker) create() (bool, error) {
 	}
 
 	// Calculate the timestamp we are willing to wait for
-	stop := time.Now().Add(l.opts.WaitTimeout)
-	retries := l.opts.RetriesCount
+	attempts := l.opts.RetryCount + 1
+	var retryDelay *time.Timer
+
 	for {
+
 		// Try to obtain a lock
 		ok, err := l.obtain(token)
 		if err != nil {
@@ -114,29 +135,34 @@ func (l *Locker) create() (bool, error) {
 			return true, nil
 		}
 
-		if time.Now().Add(l.opts.WaitRetry).After(stop) {
-			break
+		if attempts--; attempts <= 0 {
+			return false, nil
 		}
 
-		if l.opts.RetriesCount > 0 && retries <= 0 {
-			break
+		if retryDelay == nil {
+			retryDelay = time.NewTimer(l.opts.RetryDelay)
+			defer retryDelay.Stop()
+		} else {
+			retryDelay.Reset(l.opts.RetryDelay)
 		}
 
-		retries--
-		time.Sleep(l.opts.WaitRetry)
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-retryDelay.C:
+		}
 	}
-	return false, nil
 }
 
-func (l *Locker) refresh() (bool, error) {
+func (l *Locker) refresh(ctx context.Context) (bool, error) {
 	ttl := strconv.FormatInt(int64(l.opts.LockTimeout/time.Millisecond), 10)
-	status, err := l.client.Eval(luaRefresh, []string{l.key}, l.token, ttl).Result()
+	status, err := luaRefresh.Run(l.client, []string{l.key}, l.token, ttl).Result()
 	if err != nil {
 		return false, err
 	} else if status == int64(1) {
 		return true, nil
 	}
-	return l.create()
+	return l.create(ctx)
 }
 
 func (l *Locker) obtain(token string) (bool, error) {
@@ -150,7 +176,7 @@ func (l *Locker) obtain(token string) (bool, error) {
 func (l *Locker) release() error {
 	defer l.reset()
 
-	err := l.client.Eval(luaRelease, []string{l.key}, l.token).Err()
+	err := luaRelease.Run(l.client, []string{l.key}, l.token).Err()
 	if err == redis.Nil {
 		err = nil
 	}

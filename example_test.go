@@ -16,35 +16,40 @@ func Example() {
 	})
 	defer client.Close()
 
-	// Obtain a new locker with default settings
-	locker, err := lock.ObtainLock(client, "locker.foo", nil)
+	// Create a new locker with default settings
+	locker := lock.New(client, "lock.foo", nil)
+
+	// Try to obtain lock
+	hasLock, err := locker.Lock()
 	if err != nil {
-		fmt.Printf("ERROR: %s\n", err.Error())
-		return
-	} else if locker == nil {
-		fmt.Println("ERROR: could not obtain locker")
+		panic(err.Error())
+	} else if !hasLock {
+		fmt.Println("could not obtain lock!")
 		return
 	}
 
-	// Don't forget to unlock in the end
+	// Don't forget to defer Unlock!
 	defer locker.Unlock()
+	fmt.Println("I have a lock!")
 
-	// Run something
-	fmt.Println("I have a locker!")
+	// Sleep and check if still locked afterwards.
 	time.Sleep(200 * time.Millisecond)
+	if locker.IsLocked() {
+		fmt.Println("My lock has expired!")
+	}
 
-	// Renew your locker
-	ok, err := locker.Lock()
+	// Renew your lock
+	renewed, err := locker.Lock()
 	if err != nil {
-		fmt.Printf("ERROR: %s\n", err.Error())
-		return
-	} else if !ok {
-		fmt.Println("ERROR: could not renew locker")
+		panic(err.Error())
+	} else if !renewed {
+		fmt.Println("could not renew lock!")
 		return
 	}
-	fmt.Println("I have renewed my locker!")
+	fmt.Println("I have renewed my lock!")
 
 	// Output:
-	// I have a locker!
-	// I have renewed my locker!
+	// I have a lock!
+	// My lock has expired!
+	// I have renewed my lock!
 }
