@@ -136,7 +136,7 @@ func (l *Locker) create(ctx context.Context) (bool, error) {
 		}
 
 		if attempts--; attempts <= 0 {
-			return false, err
+			return false, nil
 		}
 
 		if retryDelay == nil {
