@@ -14,11 +14,11 @@ import (
 
 const testRedisKey = "__bsm_redis_lock_unit_test__"
 
-var _ = Describe("Lock", func() {
-	var subject *Lock
+var _ = Describe("Locker", func() {
+	var subject *Locker
 
-	var newLock = func() *Lock {
-		return NewLock(redisClient, testRedisKey, &Options{
+	var newLock = func() *Locker {
+		return New(redisClient, testRedisKey, &Options{
 			WaitTimeout: 100 * time.Millisecond,
 			LockTimeout: time.Second,
 		})
@@ -34,7 +34,7 @@ var _ = Describe("Lock", func() {
 	})
 
 	It("should normalize options", func() {
-		locker := NewLock(redisClient, testRedisKey, &Options{
+		locker := New(redisClient, testRedisKey, &Options{
 			RetriesCount: -1,
 			LockTimeout:  -1,
 			WaitRetry:    -1,
@@ -51,7 +51,7 @@ var _ = Describe("Lock", func() {
 		locker.Lock()
 		defer locker.Unlock()
 		_, err := ObtainLock(redisClient, testRedisKey, nil)
-		Expect(err).To(Equal(ErrCanntGetLock))
+		Expect(err).To(Equal(ErrCannotGetLock))
 	})
 
 	It("should o btain through short-cut", func() {
@@ -224,7 +224,7 @@ var _ = Describe("Lock", func() {
 			res int32
 		)
 
-		RunWithLock(redisClient, testRedisKey, func() error {
+		RunWithLock(redisClient, testRedisKey, nil, func() error {
 			for i := 0; i < 1000; i++ {
 				wg.Add(1)
 				go func() {
@@ -247,7 +247,7 @@ var _ = Describe("Lock", func() {
 			wg.Wait()
 
 			return nil
-		}, nil)
+		})
 
 		Expect(res).To(Equal(int32(0)))
 	})
@@ -263,17 +263,17 @@ var _ = Describe("Lock", func() {
 
 		go func() {
 			defer wg.Done()
-			RunWithLock(redisClient, testRedisKey, func() error {
+			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
 				atomic.AddInt32(&res, 1)
 				return nil
-			}, &Options{RetriesCount: count})
+			})
 		}()
 
-		var err = RunWithLock(redisClient, testRedisKey, func() error {
+		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
 			atomic.AddInt32(&res, 1)
 			time.Sleep(timeout)
 			return nil
-		}, nil)
+		})
 
 		wg.Wait()
 
@@ -290,17 +290,17 @@ var _ = Describe("Lock", func() {
 
 		go func() {
 			defer wg.Done()
-			RunWithLock(redisClient, testRedisKey, func() error {
+			RunWithLock(redisClient, testRedisKey, &Options{RetriesCount: count}, func() error {
 				res++
 				return nil
-			}, &Options{RetriesCount: count})
+			})
 		}()
 
-		var err = RunWithLock(redisClient, testRedisKey, func() error {
+		var err = RunWithLock(redisClient, testRedisKey, nil, func() error {
 			res++
 			time.Sleep(timeout)
 			return nil
-		}, nil)
+		})
 
 		wg.Wait()
 
