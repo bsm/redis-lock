@@ -28,7 +28,7 @@ func main() {
 	defer client.Close()
 
 	// Obtain a new lock with default settings
-	lock, err := lock.ObtainLock(client, "lock.foo", nil)
+	lock, err := lock.Obtain(client, "lock.foo", nil)
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err.Error())
 		return
