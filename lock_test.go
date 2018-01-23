@@ -15,7 +15,9 @@ import (
 const testRedisKey = "__bsm_redis_lock_unit_test__"
 
 var _ = Describe("Locker", func() {
-	var subject *Locker
+	var (
+		subject *Locker
+	)
 
 	var newLock = func() *Locker {
 		return New(redisClient, testRedisKey, &Options{
@@ -116,11 +118,22 @@ var _ = Describe("Locker", func() {
 		Expect(redisClient.Get(testRedisKey).Err()).To(Equal(redis.Nil))
 	})
 
+	It("should failure on release expired lock", func() {
+		Expect(subject.Lock()).To(BeTrue())
+		Expect(subject.IsLocked()).To(BeTrue())
+
+		time.Sleep(subject.opts.LockTimeout * 2)
+
+		err := subject.Unlock()
+		Expect(err).To(Equal(ErrLockUnlockFailed))
+	})
+
 	It("should not release someone else's locks", func() {
 		Expect(redisClient.Set(testRedisKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(subject.IsLocked()).To(BeFalse())
 
-		Expect(subject.Unlock()).NotTo(HaveOccurred())
+		err := subject.Unlock()
+		Expect(err).To(Equal(ErrLockUnlockFailed))
 		Expect(subject.token).To(Equal(""))
 		Expect(subject.IsLocked()).To(BeFalse())
 		Expect(redisClient.Get(testRedisKey).Val()).To(Equal("ABCD"))
@@ -187,6 +200,14 @@ var _ = Describe("Locker", func() {
 		Expect(res).To(Equal(int32(1)))
 	})
 
+	It("should error when lock time exceeded while running handler", func() {
+		err := Run(redisClient, testRedisKey, &Options{LockTimeout: time.Millisecond}, func() {
+			time.Sleep(time.Millisecond * 5)
+		})
+
+		Expect(err).To(Equal(ErrLockDurationExceeded))
+	})
+
 	It("should retry and wait for locks if requested", func() {
 		var (
 			wg  sync.WaitGroup
@@ -198,17 +219,15 @@ var _ = Describe("Locker", func() {
 			defer wg.Done()
 			defer GinkgoRecover()
 
-			err := Run(redisClient, testRedisKey, &Options{RetryCount: 10, RetryDelay: 10 * time.Millisecond}, func() error {
+			err := Run(redisClient, testRedisKey, &Options{RetryCount: 10, RetryDelay: 10 * time.Millisecond}, func() {
 				atomic.AddInt32(&res, 1)
-				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
 		}()
 
-		err := Run(redisClient, testRedisKey, nil, func() error {
+		err := Run(redisClient, testRedisKey, nil, func() {
 			atomic.AddInt32(&res, 1)
 			time.Sleep(20 * time.Millisecond)
-			return nil
 		})
 		wg.Wait()
 
@@ -227,17 +246,15 @@ var _ = Describe("Locker", func() {
 			defer wg.Done()
 			defer GinkgoRecover()
 
-			err := Run(redisClient, testRedisKey, &Options{RetryCount: 1, RetryDelay: 10 * time.Millisecond}, func() error {
+			err := Run(redisClient, testRedisKey, &Options{RetryCount: 1, RetryDelay: 10 * time.Millisecond}, func() {
 				atomic.AddInt32(&res, 1)
-				return nil
 			})
 			Expect(err).To(Equal(ErrLockNotObtained))
 		}()
 
-		err := Run(redisClient, testRedisKey, nil, func() error {
+		err := Run(redisClient, testRedisKey, nil, func() {
 			atomic.AddInt32(&res, 1)
 			time.Sleep(100 * time.Millisecond)
-			return nil
 		})
 		wg.Wait()
 
