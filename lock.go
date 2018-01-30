@@ -55,16 +55,14 @@ func Run(client RedisClient, key string, opts *Options, handler func()) error {
 	sem := make(chan struct{})
 	go func() {
 		handler()
-		sem <- struct{}{}
+		close(sem)
 	}()
 
-	for {
-		select {
-		case <-sem:
-			return locker.Unlock()
-		case <-time.After(locker.opts.LockTimeout):
-			return ErrLockDurationExceeded
-		}
+	select {
+	case <-sem:
+		return locker.Unlock()
+	case <-time.After(locker.opts.LockTimeout):
+		return ErrLockDurationExceeded
 	}
 }
 
