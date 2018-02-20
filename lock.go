@@ -19,7 +19,11 @@ var emptyCtx = context.Background()
 
 // ErrLockNotObtained may be returned by Obtain() and Run()
 // if a lock could not be obtained.
-var ErrLockNotObtained = errors.New("lock not obtained")
+var (
+	ErrLockUnlockFailed     = errors.New("lock unlock failed")
+	ErrLockNotObtained      = errors.New("lock not obtained")
+	ErrLockDurationExceeded = errors.New("lock duration exceeded")
+)
 
 // RedisClient is a minimal client interface.
 type RedisClient interface {
@@ -42,13 +46,24 @@ type Locker struct {
 
 // Run runs a callback handler with a Redis lock. It may return ErrLockNotObtained
 // if a lock was not successfully acquired.
-func Run(client RedisClient, key string, opts *Options, handler func() error) error {
+func Run(client RedisClient, key string, opts *Options, handler func()) error {
 	locker, err := Obtain(client, key, opts)
 	if err != nil {
 		return err
 	}
-	defer locker.Unlock()
-	return handler()
+
+	sem := make(chan struct{})
+	go func() {
+		handler()
+		close(sem)
+	}()
+
+	select {
+	case <-sem:
+		return locker.Unlock()
+	case <-time.After(locker.opts.LockTimeout):
+		return ErrLockDurationExceeded
+	}
 }
 
 // Obtain is a shortcut for New().Lock(). It may return ErrLockNotObtained
@@ -176,10 +191,15 @@ func (l *Locker) obtain(token string) (bool, error) {
 func (l *Locker) release() error {
 	defer l.reset()
 
-	err := luaRelease.Run(l.client, []string{l.key}, l.token).Err()
+	res, err := luaRelease.Run(l.client, []string{l.key}, l.token).Result()
 	if err == redis.Nil {
-		err = nil
+		return ErrLockUnlockFailed
 	}
+
+	if i, ok := res.(int64); !ok || i != 1 {
+		return ErrLockUnlockFailed
+	}
+
 	return err
 }
 
