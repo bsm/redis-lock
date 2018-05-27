@@ -134,7 +134,6 @@ func (l *Locker) create(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	token += l.opts.TokenPrefix
 
 	// Calculate the timestamp we are willing to wait for
 	attempts := l.opts.RetryCount + 1
