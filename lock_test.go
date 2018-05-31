@@ -1,7 +1,9 @@
 package lock
 
 import (
+	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,12 +20,15 @@ var _ = Describe("Locker", func() {
 	var (
 		subject *Locker
 	)
+	hostname, _ := os.Hostname()
+	tokenPfx := fmt.Sprintf("%s-%d-", hostname, os.Getpid())
 
 	var newLock = func() *Locker {
 		return New(redisClient, testRedisKey, &Options{
 			RetryCount:  4,
 			RetryDelay:  25 * time.Millisecond,
 			LockTimeout: time.Second,
+			TokenPrefix: tokenPfx,
 		})
 	}
 
