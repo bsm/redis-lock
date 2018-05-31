@@ -15,6 +15,10 @@ type Options struct {
 	// RetryDelay is the amount of time to wait between retries.
 	// Default: 100ms
 	RetryDelay time.Duration
+
+	// TokenPrefix the redis lock key's value will set TokenPrefix + randomToken
+	// If we set token prefix as hostname + pid, we can know who get the locker
+	TokenPrefix string
 }
 
 func (o *Options) normalize() *Options {
