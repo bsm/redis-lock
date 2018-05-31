@@ -70,7 +70,7 @@ var _ = Describe("Locker", func() {
 		Expect(subject.Lock()).To(BeTrue())
 		Expect(subject.IsLocked()).To(BeTrue())
 
-		Expect(redisClient.Get(testRedisKey).Result()).To(HaveLen(24))
+		Expect(redisClient.Get(testRedisKey).Result()).To(HaveLen(24 + len(subject.opts.TokenPrefix)))
 		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
@@ -82,7 +82,7 @@ var _ = Describe("Locker", func() {
 		Expect(subject.IsLocked()).To(BeTrue())
 
 		Expect(redisClient.Get(testRedisKey).Result()).To(Equal(subject.token))
-		Expect(subject.token).To(HaveLen(24))
+		Expect(subject.opts.TokenPrefix).To(Equal(subject.token[:len(subject.token)-24]))
 		Expect(getTTL()).To(BeNumerically("~", time.Second, 10*time.Millisecond))
 	})
 
