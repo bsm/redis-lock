@@ -18,3 +18,11 @@
 # [[override]]
 #  name = "github.com/x/y"
 #  version = "2.4.0"
+[[override]]
+  name = "gopkg.in/fsnotify.v1"
+  source = "https://github.com/fsnotify/fsnotify.git"
+
+[prune]
+  go-tests = true
+  unused-packages = true
+

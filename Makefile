@@ -1,10 +1,10 @@
 default: vet test
 
 vet:
-	go vet .
+	go vet ./...
 
 test:
-	go test .
+	go test ./...
 
 doc: README.md
 
