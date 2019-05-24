@@ -215,3 +215,7 @@ func randomToken() (string, error) {
 	}
 	return base64.URLEncoding.EncodeToString(buf), nil
 }
+
+func (l *Locker) GetToken() string {
+	return l.token
+}
