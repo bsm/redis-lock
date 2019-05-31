@@ -234,21 +234,16 @@ func GetLocker(client *redis.ClusterClient, key string, opts *Options) (*Locker,
 		},
 	}
 
-	var token interface{}
+	var token string
 	err := codec.Get(key, &token)
 	if err != nil {
 		return &Locker{}, err
 	}
 
-	tokenStr, ok := token.(string)
-	if !ok {
-		return nil, ErrTokenNotObtained
-	}
-
 	locker := &Locker{
 		key:    key,
 		client: client,
-		token:  tokenStr,
+		token:  token,
 		opts:   *opts,
 	}
 
