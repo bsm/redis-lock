@@ -222,7 +222,7 @@ func (l *Locker) GetToken() string {
 	return l.token
 }
 
-func GetLocker(client *redis.Client, key string, opts *Options) (*Locker, error) {
+func GetLocker(client *redis.ClusterClient, key string, opts *Options) (*Locker, error) {
 	codec := &cache.Codec{
 		Redis: client,
 		Marshal: func(v interface{}) ([]byte, error) {
