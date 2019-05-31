@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-redis/cache"
 	"github.com/go-redis/redis"
+	"github.com/vmihailenco/msgpack"
 )
 
 var luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
@@ -218,4 +220,31 @@ func randomToken() (string, error) {
 
 func (l *Locker) GetToken() string {
 	return l.token
+}
+
+func GetLocker(client *redis.Client, key string, opts *Options) (*Locker, error) {
+	codec := &cache.Codec{
+		Redis: client,
+		Marshal: func(v interface{}) ([]byte, error) {
+			return msgpack.Marshal(v)
+		},
+		Unmarshal: func(b []byte, v interface{}) error {
+			return msgpack.Unmarshal(b, v)
+		},
+	}
+
+	var token string
+	err := codec.Get(key, token)
+	if err != nil {
+		return &Locker{}, err
+	}
+
+	locker := &Locker{
+		key:    key,
+		client: client,
+		token:  token,
+		opts:   *opts,
+	}
+
+	return locker, nil
 }
