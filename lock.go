@@ -234,7 +234,7 @@ func GetLocker(client *redis.Client, key string, opts *Options) (*Locker, error)
 		},
 	}
 
-	var token string
+	var token interface{}
 	err := codec.Get(key, &token)
 	if err != nil {
 		return &Locker{}, err
@@ -243,7 +243,7 @@ func GetLocker(client *redis.Client, key string, opts *Options) (*Locker, error)
 	locker := &Locker{
 		key:    key,
 		client: client,
-		token:  token,
+		token:  token.(string),
 		opts:   *opts,
 	}
 
