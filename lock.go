@@ -9,9 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/cache"
 	"github.com/go-redis/redis"
-	"github.com/vmihailenco/msgpack"
 )
 
 var luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
@@ -25,7 +23,6 @@ var (
 	ErrLockUnlockFailed     = errors.New("lock unlock failed")
 	ErrLockNotObtained      = errors.New("lock not obtained")
 	ErrLockDurationExceeded = errors.New("lock duration exceeded")
-	ErrTokenNotObtained     = errors.New("token not obtained")
 )
 
 // RedisClient is a minimal client interface.
@@ -224,21 +221,11 @@ func (l *Locker) GetToken() string {
 }
 
 func GetLocker(client *redis.ClusterClient, key string, opts *Options) (*Locker, error) {
-	codec := &cache.Codec{
-		Redis: client,
-		Marshal: func(v interface{}) ([]byte, error) {
-			return msgpack.Marshal(v)
-		},
-		Unmarshal: func(b []byte, v interface{}) error {
-			return msgpack.Unmarshal(b, v)
-		},
+	cmd := client.Get(key)
+	if cmd.Err() != nil {
+		return &Locker{}, cmd.Err()
 	}
-
-	var token string
-	err := codec.Get(key, &token)
-	if err != nil {
-		return &Locker{}, err
-	}
+	token := cmd.Val()
 
 	locker := &Locker{
 		key:    key,
