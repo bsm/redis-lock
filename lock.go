@@ -23,7 +23,6 @@ var (
 	ErrLockUnlockFailed     = errors.New("lock unlock failed")
 	ErrLockNotObtained      = errors.New("lock not obtained")
 	ErrLockDurationExceeded = errors.New("lock duration exceeded")
-	ErrTokenNotObtained     = errors.New("token not obtained")
 )
 
 // RedisClient is a minimal client interface.
@@ -221,8 +220,11 @@ func (l *Locker) GetToken() string {
 	return l.token
 }
 
-func GetLocker(client *redis.Client, key string, opts *Options) (*Locker, error) {
+func GetLocker(client *redis.ClusterClient, key string, opts *Options) (*Locker, error) {
 	cmd := client.Get(key)
+	if cmd.Err() != nil {
+		return &Locker{}, cmd.Err()
+	}
 	token := cmd.Val()
 
 	locker := &Locker{
