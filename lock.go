@@ -215,3 +215,24 @@ func randomToken() (string, error) {
 	}
 	return base64.URLEncoding.EncodeToString(buf), nil
 }
+
+func (l *Locker) GetToken() string {
+	return l.token
+}
+
+func GetLocker(client *redis.ClusterClient, key string, opts *Options) (*Locker, error) {
+	cmd := client.Get(key)
+	if cmd.Err() != nil {
+		return &Locker{}, cmd.Err()
+	}
+	token := cmd.Val()
+
+	locker := &Locker{
+		key:    key,
+		client: client,
+		token:  token,
+		opts:   *opts,
+	}
+
+	return locker, nil
+}
